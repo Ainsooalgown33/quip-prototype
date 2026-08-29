@@ -7,7 +7,7 @@ const PhysicsCanvas = () => {
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-const socket = io('https://quip-server-7r07.onrender.com/'); // Use YOUR exact URL
+    const socket = io('https://quip-server-7r07.onrender.com'); // Your live Render URL
     
     let gameState = { 
       p1: {x: 250, y: 300}, p2: {x: 550, y: 300},
@@ -17,7 +17,6 @@ const socket = io('https://quip-server-7r07.onrender.com/'); // Use YOUR exact U
     let isDragging = false;
     let mousePos = { x: 0, y: 0 };
     
-    // Arrays to hold history for the trails
     let trails = { p1: [], p2: [] };
     
     socket.on('role', (role) => { myRole = role; });
@@ -34,14 +33,14 @@ const socket = io('https://quip-server-7r07.onrender.com/'); // Use YOUR exact U
       ctx.lineWidth = 4;
       ctx.stroke();
 
-      // NEW: Manage & Draw Trails
+      // Manage & Draw Trails
       if (gameState.matchState !== 'gameOver') {
         trails.p1.push({ x: gameState.p1.x, y: gameState.p1.y });
         trails.p2.push({ x: gameState.p2.x, y: gameState.p2.y });
         if (trails.p1.length > 15) trails.p1.shift();
         if (trails.p2.length > 15) trails.p2.shift();
       } else {
-        trails.p1 = []; trails.p2 = []; // Clear trails on game over
+        trails.p1 = []; trails.p2 = [];
       }
 
       trails.p1.forEach((pos, i) => {
@@ -85,7 +84,7 @@ const socket = io('https://quip-server-7r07.onrender.com/'); // Use YOUR exact U
       ctx.fillStyle = myRole === 'p1' ? '#38bdf8' : myRole === 'p2' ? '#f43f5e' : '#94a3b8';
       ctx.fillText(myRole === 'p1' ? 'You are BLUE' : myRole === 'p2' ? 'You are RED' : 'Spectating', 400, 580);
 
-      // NEW: Draw Countdown Timer
+      // Draw Countdown Timer
       if (gameState.matchState === 'countdown') {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
         ctx.fillRect(0, 0, 800, 600);
@@ -107,12 +106,14 @@ const socket = io('https://quip-server-7r07.onrender.com/'); // Use YOUR exact U
     };
     renderLoop();
     
-    // Input logic prevents dragging unless playing
-    const handleMouseDown = (e) => {
+    // Unified Input Logic (Mouse + Touch)
+    const handleStart = (e) => {
       if (myRole === 'spectator' || !myRole || gameState.matchState !== 'playing') return;
+      
+      const pos = e.touches ? e.touches[0] : e;
       const rect = canvas.getBoundingClientRect();
-      const clickX = e.clientX - rect.left;
-      const clickY = e.clientY - rect.top;
+      const clickX = pos.clientX - rect.left;
+      const clickY = pos.clientY - rect.top;
       const myBall = myRole === 'p1' ? gameState.p1 : gameState.p2;
       
       if (Math.hypot(clickX - myBall.x, clickY - myBall.y) < 40) {
@@ -121,13 +122,16 @@ const socket = io('https://quip-server-7r07.onrender.com/'); // Use YOUR exact U
       }
     };
     
-    const handleMouseMove = (e) => {
+    const handleMove = (e) => {
       if (!isDragging) return;
+      if (e.touches) e.preventDefault(); // Stops screen from swiping
+      
+      const pos = e.touches ? e.touches[0] : e;
       const rect = canvas.getBoundingClientRect();
-      mousePos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      mousePos = { x: pos.clientX - rect.left, y: pos.clientY - rect.top };
     };
     
-    const handleMouseUp = () => {
+    const handleEnd = () => {
       if (!isDragging) return;
       isDragging = false;
       const myBall = myRole === 'p1' ? gameState.p1 : gameState.p2;
@@ -137,15 +141,24 @@ const socket = io('https://quip-server-7r07.onrender.com/'); // Use YOUR exact U
       });
     };
     
-    canvas.addEventListener('mousedown', handleMouseDown);
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    // Listeners for Mouse
+    canvas.addEventListener('mousedown', handleStart);
+    window.addEventListener('mousemove', handleMove, { passive: false });
+    window.addEventListener('mouseup', handleEnd);
+
+    // Listeners for Mobile Touch
+    canvas.addEventListener('touchstart', handleStart, { passive: false });
+    window.addEventListener('touchmove', handleMove, { passive: false });
+    window.addEventListener('touchend', handleEnd);
     
     return () => {
       socket.disconnect();
-      canvas.removeEventListener('mousedown', handleMouseDown);
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      canvas.removeEventListener('mousedown', handleStart);
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleEnd);
+      canvas.removeEventListener('touchstart', handleStart);
+      window.removeEventListener('touchmove', handleMove);
+      window.removeEventListener('touchend', handleEnd);
     };
   }, []);
 
