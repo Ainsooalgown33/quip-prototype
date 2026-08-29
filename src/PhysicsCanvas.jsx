@@ -21,6 +21,54 @@ const PhysicsCanvas = () => {
     
     socket.on('role', (role) => { myRole = role; });
     socket.on('gameState', (state) => { gameState = state; });
+
+    // Helper function to draw fighting stickmen inside an aura
+    const drawFighter = (x, y, radius, color, isP1) => {
+      // 1. Draw the Aura (Hitbox)
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, 2 * Math.PI);
+      ctx.fillStyle = color === '#38bdf8' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(244, 63, 94, 0.15)';
+      ctx.fill();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // 2. Draw Stickman
+      const s = radius / 25; // Scale factor (P2 is larger)
+      const dir = isP1 ? 1 : -1; // P1 faces right, P2 faces left
+      
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3 * s;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      // Head
+      ctx.beginPath();
+      ctx.arc(x, y - 8 * s, 5 * s, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Torso
+      ctx.beginPath();
+      ctx.moveTo(x, y - 3 * s);
+      ctx.lineTo(x - 2 * dir * s, y + 10 * s); // Leaning forward slightly
+      ctx.stroke();
+
+      // Arms (Front punching, back guarding)
+      ctx.beginPath();
+      ctx.moveTo(x - 1 * dir * s, y);
+      ctx.lineTo(x + 10 * dir * s, y - 2 * s); // Front punch
+      ctx.moveTo(x - 1 * dir * s, y);
+      ctx.lineTo(x - 8 * dir * s, y - 6 * s); // Back guard
+      ctx.stroke();
+
+      // Legs (Wide fighting stance)
+      ctx.beginPath();
+      ctx.moveTo(x - 2 * dir * s, y + 10 * s);
+      ctx.lineTo(x + 8 * dir * s, y + 18 * s); // Front leg
+      ctx.moveTo(x - 2 * dir * s, y + 10 * s);
+      ctx.lineTo(x - 10 * dir * s, y + 20 * s); // Back leg
+      ctx.stroke();
+    };
     
     const renderLoop = () => {
       ctx.fillStyle = '#0f172a';
@@ -46,23 +94,20 @@ const PhysicsCanvas = () => {
       trails.p1.forEach((pos, i) => {
         ctx.beginPath();
         ctx.arc(pos.x, pos.y, 25 * (i / 15), 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(56, 189, 248, ${i / 30})`;
+        ctx.fillStyle = `rgba(56, 189, 248, ${i / 40})`;
         ctx.fill();
       });
 
       trails.p2.forEach((pos, i) => {
         ctx.beginPath();
         ctx.arc(pos.x, pos.y, 35 * (i / 15), 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(244, 63, 94, ${i / 30})`;
+        ctx.fillStyle = `rgba(244, 63, 94, ${i / 40})`;
         ctx.fill();
       });
       
-      // Draw Players
-      ctx.beginPath(); ctx.arc(gameState.p1.x, gameState.p1.y, 25, 0, 2 * Math.PI);
-      ctx.fillStyle = '#38bdf8'; ctx.fill();
-      
-      ctx.beginPath(); ctx.arc(gameState.p2.x, gameState.p2.y, 35, 0, 2 * Math.PI);
-      ctx.fillStyle = '#f43f5e'; ctx.fill();
+      // Draw Fighters Instead of Plain Circles
+      drawFighter(gameState.p1.x, gameState.p1.y, 25, '#38bdf8', true);
+      drawFighter(gameState.p2.x, gameState.p2.y, 35, '#f43f5e', false);
       
       // Draw Aim Line
       if (isDragging && myRole && gameState.matchState === 'playing') {
@@ -91,7 +136,7 @@ const PhysicsCanvas = () => {
         ctx.font = 'bold 120px Arial';
         ctx.fillStyle = '#facc15';
         const seconds = Math.ceil(gameState.matchTimer / 60);
-        ctx.fillText(seconds > 0 ? seconds : "GO!", 400, 330);
+        ctx.fillText(seconds > 0 ? seconds : "FIGHT!", 400, 330);
       }
 
       // Draw Win Screen Overlay
@@ -124,7 +169,7 @@ const PhysicsCanvas = () => {
     
     const handleMove = (e) => {
       if (!isDragging) return;
-      if (e.touches) e.preventDefault(); // Stops screen from swiping
+      if (e.touches) e.preventDefault();
       
       const pos = e.touches ? e.touches[0] : e;
       const rect = canvas.getBoundingClientRect();
@@ -141,12 +186,10 @@ const PhysicsCanvas = () => {
       });
     };
     
-    // Listeners for Mouse
     canvas.addEventListener('mousedown', handleStart);
     window.addEventListener('mousemove', handleMove, { passive: false });
     window.addEventListener('mouseup', handleEnd);
 
-    // Listeners for Mobile Touch
     canvas.addEventListener('touchstart', handleStart, { passive: false });
     window.addEventListener('touchmove', handleMove, { passive: false });
     window.addEventListener('touchend', handleEnd);
