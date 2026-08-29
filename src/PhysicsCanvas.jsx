@@ -7,7 +7,7 @@ const PhysicsCanvas = () => {
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    const socket = io('http://localhost:4000');
+const socket = io('https://quip-server-7r07.onrender.com/'); // Use YOUR exact URL
     
     let gameState = { 
       p1: {x: 250, y: 300}, p2: {x: 550, y: 300},
