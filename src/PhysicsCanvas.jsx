@@ -12,14 +12,17 @@ const PhysicsCanvas = () => {
   const [showTutorial, setShowTutorial] = useState(false); // NEW: Tutorial State
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return; 
-    const ctx = canvas.getContext('2d');
-    
-    if (!socketRef.current) {
-      socketRef.current = io('https://quip-server-7r07.onrender.com'); 
-    }
-    const socket = socketRef.current;
+  // 1. MOVED THIS UP: Connect to the server immediately, before checking for the canvas
+  if (!socketRef.current) {
+    socketRef.current = io('https://quip-server-7r07.onrender.com'); 
+  }
+  const socket = socketRef.current;
+
+  // 2. Now check for the canvas. If we are on the menu, it stops here safely.
+  const canvas = canvasRef.current;
+  if (!canvas) return; 
+  
+  const ctx = canvas.getContext('2d');
     
     let gameState = { 
       p1: {x: 250, y: 300}, p2: {x: 550, y: 300},
