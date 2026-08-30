@@ -3,9 +3,8 @@ import { io } from 'socket.io-client';
 
 const PhysicsCanvas = () => {
   const canvasRef = useRef(null);
-  const socketRef = useRef(null); // Keep track of socket for our HTML buttons
+  const socketRef = useRef(null); 
   
-  // NEW: React State for the HTML Matchmaking Overlay
   const [lobbyUI, setLobbyUI] = useState({ state: 'lobby', role: 'unassigned', ready: 0 });
 
   useEffect(() => {
@@ -22,6 +21,7 @@ const PhysicsCanvas = () => {
 
     let renderState = { p1: {x: 250, y: 300}, p2: {x: 550, y: 300} };
     let prevScores = { p1: 0, p2: 0 };
+    let prevHealth = { p1: 100, p2: 100 }; // NEW: Track health drops for VFX
     let myRole = 'unassigned';
     let isDragging = false;
     let mousePos = { x: 0, y: 0 };
@@ -31,9 +31,8 @@ const PhysicsCanvas = () => {
 
     let shakeFrames = 0; let shakeIntensity = 0;
     let flashOpacity = 0; let impactFrames = 0;
-    let prevDist = null; let audioCtx = null;
+    let audioCtx = null;
     
-    // Sync variables to prevent infinite React re-renders
     let currentMatchState = 'lobby';
     let currentReady = 0;
 
@@ -82,19 +81,22 @@ const PhysicsCanvas = () => {
     socket.on('gameState', (state) => { 
       gameState = state; 
       
-      // Update React UI state only when necessary to prevent lag
       if (state.matchState !== currentMatchState || state.playersReady !== currentReady) {
         currentMatchState = state.matchState;
         currentReady = state.playersReady;
         setLobbyUI(prev => ({ ...prev, state: state.matchState, ready: state.playersReady }));
       }
       
-      const dist = Math.hypot(state.p1.x - state.p2.x, state.p1.y - state.p2.y);
-      if (prevDist !== null && dist <= 61 && prevDist > 61) {
-        impactFrames = 4; shakeFrames = 15; shakeIntensity = 25; flashOpacity = 0.5; playSound('hit');
-        spawnParticles((state.p1.x + state.p2.x) / 2, (state.p1.y + state.p2.y) / 2, '#facc15', 25, 8); 
+      // NEW: Trigger effects strictly based on wall damage
+      if (state.health.p1 < prevHealth.p1) {
+        impactFrames = 3; shakeFrames = 15; shakeIntensity = 25; flashOpacity = 0.5; playSound('hit');
+        spawnParticles(state.p1.x, state.p1.y, '#38bdf8', 30, 10);
       }
-      prevDist = dist;
+      if (state.health.p2 < prevHealth.p2) {
+        impactFrames = 3; shakeFrames = 15; shakeIntensity = 25; flashOpacity = 0.5; playSound('hit');
+        spawnParticles(state.p2.x, state.p2.y, '#f43f5e', 30, 10);
+      }
+      prevHealth = { ...state.health };
 
       if (state.scores.p1 > prevScores.p1) {
         playSound('explode'); spawnParticles(state.p2.x, state.p2.y, '#f43f5e', 60, 15);
@@ -131,22 +133,18 @@ const PhysicsCanvas = () => {
       ctx.beginPath(); ctx.moveTo(x - 2 * dir * s, y + 10 * s); ctx.lineTo(x + 8 * dir * s, y + 18 * s); ctx.moveTo(x - 2 * dir * s, y + 10 * s); ctx.lineTo(x - 10 * dir * s, y + 20 * s); ctx.stroke();
     };
 
-    // NEW: Health Bar Renderer
     const drawHealthBar = (x, y, hp, color) => {
       const width = 60; const height = 6;
-      const px = x - width / 2; const py = y - 50; // Float above character
+      const px = x - width / 2; const py = y - 50; 
       
-      // Background track
       ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
       ctx.fillRect(px, py, width, height);
       
-      // Health fill
-      ctx.fillStyle = hp > 30 ? color : '#ef4444'; // Turns red if critical
+      ctx.fillStyle = hp > 30 ? color : '#ef4444'; 
       ctx.shadowBlur = 10; ctx.shadowColor = ctx.fillStyle;
       ctx.fillRect(px, py, width * (Math.max(0, hp) / 100), height);
       ctx.shadowBlur = 0;
       
-      // Border
       ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 2;
       ctx.strokeRect(px, py, width, height);
     };
@@ -194,7 +192,6 @@ const PhysicsCanvas = () => {
       ctx.shadowBlur = 50; ctx.shadowColor = '#000000'; ctx.beginPath(); ctx.arc(400, 300, 250, 0, 2 * Math.PI);
       ctx.fillStyle = arenaGrad; ctx.fill(); ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 8; ctx.stroke(); ctx.shadowBlur = 0;
 
-      // Draw active barrier indicator
       if (gameState.matchState === 'playing') {
         ctx.beginPath(); ctx.arc(400, 300, 248, 0, 2 * Math.PI);
         ctx.strokeStyle = (gameState.health?.p1 > 0 && gameState.health?.p2 > 0) ? 'rgba(56, 189, 248, 0.3)' : 'rgba(239, 68, 68, 0.5)';
@@ -234,7 +231,6 @@ const PhysicsCanvas = () => {
       ctx.globalCompositeOperation = 'source-over'; 
       ctx.restore(); 
 
-      // Draw Floating Health Bars
       if (gameState.matchState === 'playing' || gameState.matchState === 'countdown') {
         drawHealthBar(renderState.p1.x, renderState.p1.y, gameState.health?.p1 ?? 100, '#38bdf8');
         drawHealthBar(renderState.p2.x, renderState.p2.y, gameState.health?.p2 ?? 100, '#f43f5e');
@@ -320,11 +316,9 @@ const PhysicsCanvas = () => {
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', backgroundColor: '#020617', padding: '2rem', minHeight: '100vh', margin: 0, fontFamily: 'sans-serif' }}>
       <h2 style={{ color: '#f8fafc', textTransform: 'uppercase', letterSpacing: '4px', fontSize: '2rem', textShadow: '0 0 20px rgba(56, 189, 248, 0.5)', margin: '0 0 1rem 0' }}>Slingshot Sumo</h2>
       
-      {/* Wrapper to stack the Canvas and the HTML Lobby Overlay */}
       <div style={{ position: 'relative' }}>
         <canvas ref={canvasRef} width={800} height={600} style={{ border: '4px solid #1e293b', borderRadius: '16px', boxShadow: '0 0 60px rgba(0,0,0,1)' }} />
         
-        {/* NEW: Matchmaking Lobby HTML Overlay */}
         {lobbyUI.state === 'lobby' && (
           <div style={{ 
             position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', 
