@@ -3,132 +3,81 @@ import { io } from 'socket.io-client';
 
 const PhysicsCanvas = () => {
   const canvasRef = useRef(null);
-  const socketRef = useRef(null); 
+  const socketRef = useRef(null);
   
   const [appState, setAppState] = useState('menu'); 
   const [roomInput, setRoomInput] = useState('');
   const [lobbyUI, setLobbyUI] = useState({ state: 'lobby', role: 'unassigned', ready: 0 });
   const [cooldowns, setCooldowns] = useState({ dash: 0, shield: 0 });
-  const [showTutorial, setShowTutorial] = useState(false); // NEW: Tutorial State
+
+  // Quip-style color palette
+  const colors = {
+    bg: '#f4f6f8',
+    arenaRing: '#8b5cf6', // Quip Purple
+    p1: '#f43f5e',        // Red/Pink
+    p2: '#0ea5e9',        // Light Blue
+    border: '#111827'     // Thick black lines
+  };
 
   useEffect(() => {
-  // 1. MOVED THIS UP: Connect to the server immediately, before checking for the canvas
-  if (!socketRef.current) {
-    socketRef.current = io('https://quip-server-7r07.onrender.com'); 
-  }
-  const socket = socketRef.current;
-
-  // 2. Now check for the canvas. If we are on the menu, it stops here safely.
-  const canvas = canvasRef.current;
-  if (!canvas) return; 
-  
-  const ctx = canvas.getContext('2d');
+    if (!socketRef.current) socketRef.current = io('https://quip-server-7r07.onrender.com'); 
+    const socket = socketRef.current;
     
-    let gameState = { 
-      p1: {x: 250, y: 300}, p2: {x: 550, y: 300},
-      scores: { p1: 0, p2: 0 }, health: { p1: 100, p2: 100 }, 
-      matchState: 'lobby', shields: { p1: 0, p2: 0 }
-    };
+    const canvas = canvasRef.current;
+    if (!canvas) return; 
+    const ctx = canvas.getContext('2d');
+    
+    let gameState = { p1: {x: 250, y: 300}, p2: {x: 550, y: 300}, scores: { p1: 0, p2: 0 }, health: { p1: 100, p2: 100 }, matchState: 'lobby', shields: { p1: 0, p2: 0 }};
     let renderState = { p1: {x: 250, y: 300}, p2: {x: 550, y: 300} };
-    let prevHealth = { p1: 100, p2: 100 }; 
     let myRole = 'unassigned';
     let isDragging = false; let mousePos = { x: 0, y: 0 };
-    let trails = { p1: [], p2: [] }; let particles = [];
-    let shakeFrames = 0; let shakeIntensity = 0; let flashOpacity = 0; let impactFrames = 0;
-    let audioCtx = null;
-
-    const initAudio = () => {
-      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      if (audioCtx.state === 'suspended') audioCtx.resume();
-    };
-
-    const playSound = (type) => {
-      if (!audioCtx) return;
-      const osc = audioCtx.createOscillator(); const gainNode = audioCtx.createGain();
-      osc.connect(gainNode); gainNode.connect(audioCtx.destination);
-      const now = audioCtx.currentTime;
-      if (type === 'hit') {
-        osc.type = 'square'; osc.frequency.setValueAtTime(100, now); osc.frequency.exponentialRampToValueAtTime(20, now + 0.2);
-        gainNode.gain.setValueAtTime(0.6, now); gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
-        osc.start(now); osc.stop(now + 0.2);
-      } else if (type === 'shield') {
-        osc.type = 'sine'; osc.frequency.setValueAtTime(400, now); osc.frequency.linearRampToValueAtTime(800, now + 0.2);
-        gainNode.gain.setValueAtTime(0.5, now); gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
-        osc.start(now); osc.stop(now + 0.5);
-      }
-    };
-
-    const spawnParticles = (x, y, color, count, speedConfig) => {
-      for (let i = 0; i < count; i++) {
-        const angle = Math.random() * Math.PI * 2; const speed = Math.random() * speedConfig + 2;
-        particles.push({ x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life: 1.0, decay: Math.random() * 0.03 + 0.02, color, size: Math.random() * 4 + 2 });
-      }
-    };
+    let shakeFrames = 0; let shakeIntensity = 0;
     
     socket.on('role', (role) => { myRole = role; setLobbyUI(prev => ({ ...prev, role: role })); });
-
     socket.on('gameState', (state) => { 
       gameState = state; 
       setLobbyUI(prev => ({ ...prev, state: state.matchState, ready: state.playersReady }));
-      
       if (myRole === 'p1' || myRole === 'p2') {
-        setCooldowns({ 
-          dash: Math.ceil(state.cooldowns[myRole].dash / 60), 
-          shield: Math.ceil(state.cooldowns[myRole].shield / 60) 
-        });
+        setCooldowns({ dash: Math.ceil(state.cooldowns[myRole].dash / 60), shield: Math.ceil(state.cooldowns[myRole].shield / 60) });
       }
-      
-      if (state.health.p1 < prevHealth.p1) {
-        impactFrames = 3; shakeFrames = 15; shakeIntensity = 25; flashOpacity = 0.5; playSound('hit');
-        spawnParticles(state.p1.x, state.p1.y, '#38bdf8', 30, 10);
-        if (navigator.vibrate) navigator.vibrate(100); 
-      }
-      if (state.health.p2 < prevHealth.p2) {
-        impactFrames = 3; shakeFrames = 15; shakeIntensity = 25; flashOpacity = 0.5; playSound('hit');
-        spawnParticles(state.p2.x, state.p2.y, '#f43f5e', 30, 10);
-        if (navigator.vibrate) navigator.vibrate(100); 
-      }
-      prevHealth = { ...state.health };
     });
 
     const handleKeyDown = (e) => {
       if (myRole !== 'p1' && myRole !== 'p2') return;
       if (e.code === 'KeyQ') socket.emit('useSkill', 'dash');
-      if (e.code === 'KeyE') { socket.emit('useSkill', 'shield'); playSound('shield'); }
+      if (e.code === 'KeyE') socket.emit('useSkill', 'shield');
     };
     window.addEventListener('keydown', handleKeyDown);
 
-    const drawGrid = () => {
-      ctx.strokeStyle = 'rgba(51, 65, 85, 0.2)'; ctx.lineWidth = 1;
-      for (let i = 0; i <= 800; i += 40) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 600); ctx.stroke(); }
-      for (let j = 0; j <= 600; j += 40) { ctx.beginPath(); ctx.moveTo(0, j); ctx.lineTo(800, j); ctx.stroke(); }
-    };
+    // DRAW TOON-SHADED 3D PUCK (Quip Style)
+    const drawToonPuck = (x, y, radius, color, isShielded) => {
+      const height = 15; // 3D depth
 
-    const draw3DFighter = (x, y, radius, color, isP1, isShielded) => {
-      ctx.shadowOffsetX = (x - 400) * 0.2; ctx.shadowOffsetY = (y - 300) * 0.2;
-      ctx.shadowBlur = isShielded ? 40 : 25; ctx.shadowColor = isShielded ? '#ffffff' : color; 
-      
-      const gradient = ctx.createRadialGradient(x - radius/3, y - radius/3, radius/10, x, y, radius);
-      gradient.addColorStop(0, '#ffffff'); gradient.addColorStop(0.3, color); gradient.addColorStop(1, isShielded ? '#ffffff' : 'transparent');
-      
-      ctx.beginPath(); ctx.arc(x, y, radius, 0, 2 * Math.PI); ctx.fillStyle = gradient; ctx.fill();
-      ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
-      ctx.strokeStyle = isShielded ? '#ffffff' : color; ctx.lineWidth = isShielded ? 6 : 2; ctx.stroke();
-      
-      const s = radius / 25; const dir = isP1 ? 1 : -1; 
-      ctx.strokeStyle = isShielded ? '#000000' : '#ffffff'; ctx.lineWidth = 3 * s; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-      ctx.beginPath(); ctx.arc(x, y - 8 * s, 5 * s, 0, Math.PI * 2); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(x, y - 3 * s); ctx.lineTo(x - 2 * dir * s, y + 10 * s); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(x - 1 * dir * s, y); ctx.lineTo(x + 10 * dir * s, y - 2 * s); ctx.moveTo(x - 1 * dir * s, y); ctx.lineTo(x - 8 * dir * s, y - 6 * s); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(x - 2 * dir * s, y + 10 * s); ctx.lineTo(x + 8 * dir * s, y + 18 * s); ctx.moveTo(x - 2 * dir * s, y + 10 * s); ctx.lineTo(x - 10 * dir * s, y + 20 * s); ctx.stroke();
-    };
+      // 1. Draw solid black drop shadow (offset bottom right)
+      ctx.fillStyle = colors.border;
+      ctx.beginPath(); ctx.arc(x + 4, y + 4, radius, 0, Math.PI * 2); ctx.fill();
 
-    const drawHealthBar = (x, y, hp, color) => {
-      const width = 60; const height = 6; const px = x - width / 2; const py = y - 50; 
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.8)'; ctx.fillRect(px, py, width, height);
-      ctx.fillStyle = hp > 30 ? color : '#ef4444'; ctx.shadowBlur = 10; ctx.shadowColor = ctx.fillStyle;
-      ctx.fillRect(px, py, width * (Math.max(0, hp) / 100), height); ctx.shadowBlur = 0;
-      ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 2; ctx.strokeRect(px, py, width, height);
+      // 2. Draw Cylinder Body (Darker shade)
+      ctx.fillStyle = colors.border;
+      ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
+      ctx.fillRect(x - radius, y - height, radius * 2, height);
+      
+      ctx.fillStyle = isShielded ? '#cbd5e1' : color;
+      ctx.filter = 'brightness(70%)';
+      ctx.beginPath(); ctx.arc(x, y, radius - 3, 0, Math.PI * 2); ctx.fill();
+      ctx.fillRect(x - radius + 3, y - height, (radius * 2) - 6, height);
+      ctx.filter = 'none';
+
+      // 3. Draw Top Cap (Main color + thick border)
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = colors.border;
+      ctx.fillStyle = isShielded ? '#f1f5f9' : color;
+      ctx.beginPath(); ctx.arc(x, y - height, radius, 0, Math.PI * 2); 
+      ctx.fill(); ctx.stroke();
+
+      // 4. Draw Inner Highlight (adds domed reflection feel)
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.beginPath(); ctx.ellipse(x - radius/3, y - height - radius/3, radius/3, radius/4, Math.PI/4, 0, Math.PI * 2); ctx.fill();
     };
     
     let animationId;
@@ -137,89 +86,66 @@ const PhysicsCanvas = () => {
       renderState.p1.x += (gameState.p1.x - renderState.p1.x) * 0.3; renderState.p1.y += (gameState.p1.y - renderState.p1.y) * 0.3;
       renderState.p2.x += (gameState.p2.x - renderState.p2.x) * 0.3; renderState.p2.y += (gameState.p2.y - renderState.p2.y) * 0.3;
 
-      if (impactFrames > 0) {
-        const isWhiteBg = impactFrames % 2 === 0; ctx.fillStyle = isWhiteBg ? '#ffffff' : '#000000'; ctx.fillRect(0, 0, 800, 600); 
-        const fgColor = isWhiteBg ? '#000000' : '#ffffff';
-        ctx.save(); ctx.translate((renderState.p1.x + renderState.p2.x) / 2, (renderState.p1.y + renderState.p2.y) / 2); ctx.fillStyle = fgColor;
-        for (let i = 0; i < 20; i++) { ctx.rotate((Math.PI * 2) / 20); ctx.beginPath(); ctx.moveTo(40, -5); ctx.lineTo(1000, -10 - Math.random() * 40); ctx.lineTo(1000, 10 + Math.random() * 40); ctx.lineTo(40, 5); ctx.fill(); }
-        ctx.restore();
-        ctx.fillStyle = fgColor; ctx.beginPath(); ctx.arc(renderState.p1.x, renderState.p1.y, 30, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(renderState.p2.x, renderState.p2.y, 42, 0, Math.PI * 2); ctx.fill();
-        impactFrames--; animationId = requestAnimationFrame(renderLoop); return;
-      }
-
-      ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, 800, 600);
+      // Fill background off-white
+      ctx.fillStyle = colors.bg; ctx.fillRect(0, 0, 800, 600);
+      
       ctx.save(); 
       if (shakeFrames > 0) { ctx.translate((Math.random() - 0.5) * shakeIntensity, (Math.random() - 0.5) * shakeIntensity); shakeFrames--; shakeIntensity *= 0.85; }
-      drawGrid();
+
+      // DRAW ARENA RING (Quip Style - Flat purple with thick black drop shadow)
+      const ringX = 400; const ringY = 300; const ringR = 250;
       
-      const arenaGrad = ctx.createRadialGradient(400, 300, 100, 400, 300, 250);
-      arenaGrad.addColorStop(0, 'rgba(15, 23, 42, 0.8)'); arenaGrad.addColorStop(1, 'rgba(51, 65, 85, 0.3)');
-      ctx.beginPath(); ctx.arc(400, 300, 250, 0, 2 * Math.PI); ctx.fillStyle = arenaGrad; ctx.fill(); ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 8; ctx.stroke(); 
-
-      if (gameState.matchState === 'playing') {
-        ctx.beginPath(); ctx.arc(400, 300, 248, 0, 2 * Math.PI);
-        ctx.strokeStyle = (gameState.health?.p1 > 0 && gameState.health?.p2 > 0) ? 'rgba(56, 189, 248, 0.3)' : 'rgba(239, 68, 68, 0.5)';
-        ctx.lineWidth = 4; ctx.stroke();
-      }
-
-      ctx.globalCompositeOperation = 'lighter'; 
-      if (gameState.matchState !== 'gameOver' && gameState.matchState !== 'lobby') {
-        trails.p1.push({ x: renderState.p1.x, y: renderState.p1.y }); trails.p2.push({ x: renderState.p2.x, y: renderState.p2.y });
-        if (trails.p1.length > 20) trails.p1.shift(); if (trails.p2.length > 20) trails.p2.shift();
-      } else { trails.p1 = []; trails.p2 = []; }
-
-      trails.p1.forEach((pos, i) => { ctx.beginPath(); ctx.arc(pos.x, pos.y, 25 * (i / 20), 0, Math.PI * 2); ctx.fillStyle = `rgba(56, 189, 248, ${i / 50})`; ctx.fill(); });
-      trails.p2.forEach((pos, i) => { ctx.beginPath(); ctx.arc(pos.x, pos.y, 35 * (i / 20), 0, Math.PI * 2); ctx.fillStyle = `rgba(244, 63, 94, ${i / 50})`; ctx.fill(); });
-
-      for (let i = particles.length - 1; i >= 0; i--) {
-        let p = particles[i]; p.x += p.vx; p.y += p.vy; p.life -= p.decay;
-        if (p.life <= 0) { particles.splice(i, 1); } else {
-          ctx.beginPath(); ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2); ctx.fillStyle = p.color; ctx.globalAlpha = p.life; ctx.fill(); ctx.globalAlpha = 1.0;
-        }
-      }
+      // Arena Solid Black Shadow
+      ctx.beginPath(); ctx.arc(ringX + 8, ringY + 8, ringR + 10, 0, 2 * Math.PI);
+      ctx.fillStyle = colors.border; ctx.fill();
       
-      draw3DFighter(renderState.p1.x, renderState.p1.y, 25, '#38bdf8', true, gameState.shields?.p1 > 0);
-      draw3DFighter(renderState.p2.x, renderState.p2.y, 35, '#f43f5e', false, gameState.shields?.p2 > 0);
+      // Arena Purple Ring
+      ctx.beginPath(); ctx.arc(ringX, ringY, ringR, 0, 2 * Math.PI);
+      ctx.fillStyle = '#ffffff'; ctx.fill();
+      ctx.lineWidth = 20; ctx.strokeStyle = colors.arenaRing; ctx.stroke();
+      ctx.lineWidth = 4; ctx.strokeStyle = colors.border; ctx.stroke(); // Inner border
+      ctx.beginPath(); ctx.arc(ringX, ringY, ringR + 10, 0, 2 * Math.PI); ctx.stroke(); // Outer border
+
+      // Draw Pucks
+      drawToonPuck(renderState.p1.x, renderState.p1.y, 25, colors.p1, gameState.shields?.p1 > 0);
+      drawToonPuck(renderState.p2.x, renderState.p2.y, 35, colors.p2, gameState.shields?.p2 > 0);
       
+      // Aim Line (Clean dashed black line)
       if (isDragging && (myRole === 'p1' || myRole === 'p2') && gameState.matchState === 'playing') {
         const myBall = myRole === 'p1' ? renderState.p1 : renderState.p2;
-        const dragDist = Math.hypot(myBall.x - mousePos.x, myBall.y - mousePos.y);
-        ctx.beginPath(); ctx.moveTo(myBall.x, myBall.y); ctx.lineTo(mousePos.x, mousePos.y);
-        ctx.strokeStyle = dragDist > 100 ? '#ef4444' : dragDist > 50 ? '#f97316' : '#facc15'; ctx.lineWidth = Math.min(8, 2 + (dragDist / 20));
-        ctx.setLineDash([15, 10]); ctx.stroke(); ctx.setLineDash([]);
+        ctx.beginPath(); ctx.moveTo(myBall.x, myBall.y - 15); ctx.lineTo(mousePos.x, mousePos.y);
+        ctx.strokeStyle = colors.border; ctx.lineWidth = 4;
+        ctx.setLineDash([10, 10]); ctx.stroke(); ctx.setLineDash([]);
+        
+        // Draw target crosshair
+        ctx.fillStyle = colors.border;
+        ctx.beginPath(); ctx.arc(mousePos.x, mousePos.y, 6, 0, Math.PI*2); ctx.fill();
       }
 
-      ctx.globalCompositeOperation = 'source-over'; ctx.restore(); 
+      ctx.restore(); 
 
-      if (gameState.matchState === 'playing' || gameState.matchState === 'countdown') {
-        drawHealthBar(renderState.p1.x, renderState.p1.y, gameState.health?.p1 ?? 100, '#38bdf8');
-        drawHealthBar(renderState.p2.x, renderState.p2.y, gameState.health?.p2 ?? 100, '#f43f5e');
-      }
+      // Floating Score UI inside canvas
+      ctx.font = '900 36px "Montserrat", sans-serif'; ctx.textAlign = 'center';
+      ctx.fillStyle = colors.p1; ctx.fillText(gameState.scores.p1, 300, 60);
+      ctx.fillStyle = colors.border; ctx.fillText('-', 400, 60);
+      ctx.fillStyle = colors.p2; ctx.fillText(gameState.scores.p2, 500, 60);
 
-      if (flashOpacity > 0) { ctx.fillStyle = `rgba(255, 255, 255, ${flashOpacity})`; ctx.fillRect(0, 0, 800, 600); flashOpacity -= 0.05; }
-      
-      ctx.font = '900 48px Arial'; ctx.textAlign = 'center'; ctx.fillStyle = '#38bdf8'; ctx.fillText(gameState.scores.p1, 280, 60);
-      ctx.fillStyle = '#475569'; ctx.fillText('-', 400, 60); ctx.fillStyle = '#f43f5e'; ctx.fillText(gameState.scores.p2, 520, 60);
-      
+      // Countdown Overlay
       if (gameState.matchState === 'countdown') {
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.7)'; ctx.fillRect(0, 0, 800, 600);
-        ctx.font = '900 140px Arial'; ctx.fillStyle = '#facc15'; ctx.shadowBlur = 40; ctx.shadowColor = '#facc15';
-        const seconds = Math.ceil(gameState.matchTimer / 60); ctx.fillText(seconds > 0 ? seconds : "FIGHT!", 400, 340); ctx.shadowBlur = 0;
+        ctx.fillStyle = 'rgba(244, 246, 248, 0.8)'; ctx.fillRect(0, 0, 800, 600);
+        ctx.font = '900 80px "Montserrat", sans-serif'; 
+        ctx.fillStyle = colors.border;
+        const seconds = Math.ceil(gameState.matchTimer / 60); 
+        ctx.fillText(seconds > 0 ? seconds : "FIGHT!", 400, 320);
       }
 
-      if (gameState.matchState === 'gameOver') {
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)'; ctx.fillRect(0, 0, 800, 600);
-        ctx.font = '900 80px Arial'; ctx.fillStyle = gameState.winner === 'p1' ? '#38bdf8' : '#f43f5e';
-        ctx.shadowBlur = 50; ctx.shadowColor = ctx.fillStyle; ctx.fillText(gameState.winner === 'p1' ? 'BLUE WINS!' : 'RED WINS!', 400, 300); ctx.shadowBlur = 0;
-      }
-      
       animationId = requestAnimationFrame(renderLoop);
     };
     
     if (appState === 'inRoom') renderLoop();
     
     const handleStart = (e) => {
-      initAudio(); if (myRole !== 'p1' && myRole !== 'p2') return; if (gameState.matchState !== 'playing') return;
+      if (myRole !== 'p1' && myRole !== 'p2') return; if (gameState.matchState !== 'playing') return;
       const pos = e.touches ? e.touches[0] : e; const rect = canvas.getBoundingClientRect();
       isDragging = true; mousePos = { x: pos.clientX - rect.left, y: pos.clientY - rect.top };
     };
@@ -256,64 +182,92 @@ const PhysicsCanvas = () => {
     setAppState('inRoom');
   };
 
-  if (appState === 'menu') {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', backgroundColor: '#020617', minHeight: '100vh', fontFamily: 'sans-serif', position: 'relative' }}>
-        <h1 style={{ color: '#f8fafc', fontSize: '4rem', textShadow: '0 0 20px #38bdf8', marginBottom: '2rem' }}>SLINGSHOT SUMO</h1>
-        <input type="text" placeholder="ENTER ROOM CODE" value={roomInput} onChange={(e) => setRoomInput(e.target.value)} maxLength={6} style={{ fontSize: '2rem', padding: '1rem', textAlign: 'center', borderRadius: '8px', border: '2px solid #38bdf8', backgroundColor: '#0f172a', color: '#fff', textTransform: 'uppercase', marginBottom: '2rem' }} />
-        
-        <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem' }}>
-          <button onClick={() => handleJoinRoom('play')} style={{ padding: '1rem 3rem', fontSize: '1.5rem', backgroundColor: '#38bdf8', color: '#0f172a', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>FIGHT</button>
-          <button onClick={() => handleJoinRoom('spectate')} style={{ padding: '1rem 3rem', fontSize: '1.5rem', backgroundColor: '#334155', color: '#f8fafc', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>SPECTATE</button>
+  // REUSABLE QUIP-STYLE BUTTON COMPONENT
+  const QuipButton = ({ onClick, children, primary }) => (
+    <button onClick={onClick} style={{
+      padding: '12px 32px', fontSize: '1.1rem', fontWeight: 'bold', fontFamily: '"Montserrat", sans-serif',
+      backgroundColor: primary ? '#8b5cf6' : '#ffffff', color: primary ? '#ffffff' : '#111827',
+      border: '3px solid #111827', borderRadius: '9999px', cursor: 'pointer',
+      boxShadow: '4px 4px 0px #111827', transition: 'transform 0.1s', textTransform: 'uppercase'
+    }}
+    onMouseDown={(e) => { e.currentTarget.style.transform = 'translate(2px, 2px)'; e.currentTarget.style.boxShadow = '2px 2px 0px #111827'; }}
+    onMouseUp={(e) => { e.currentTarget.style.transform = 'translate(0px, 0px)'; e.currentTarget.style.boxShadow = '4px 4px 0px #111827'; }}
+    >
+      {children}
+    </button>
+  );
+
+  // --- HTML LAYOUT ---
+  return (
+    <div style={{ backgroundColor: '#f4f6f8', minHeight: '100vh', fontFamily: '"Montserrat", sans-serif', color: '#111827', margin: 0 }}>
+      
+      {/* Top Navbar mimicking Quip */}
+      <nav style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 2rem', backgroundColor: '#ffffff', borderBottom: '3px solid #111827' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2rem' }}>
+          <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: '900', letterSpacing: '-1px' }}>quip</h1>
+          <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.9rem', fontWeight: 'bold', color: '#4b5563' }}>
+            <span style={{cursor: 'pointer'}}>Games</span>
+            <span style={{cursor: 'pointer'}}>How it works</span>
+            <span style={{cursor: 'pointer'}}>Responsible play</span>
+          </div>
         </div>
+        <QuipButton primary={true}>Play free</QuipButton>
+      </nav>
 
-        <button onClick={() => setShowTutorial(true)} style={{ padding: '0.8rem 2rem', fontSize: '1.2rem', backgroundColor: 'transparent', color: '#facc15', border: '2px solid #facc15', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', transition: 'all 0.2s' }}>HOW TO PLAY</button>
-
-        {/* Tutorial Modal */}
-        {showTutorial && (
-          <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(2, 6, 23, 0.95)', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 50, padding: '2rem' }}>
-            <div style={{ maxWidth: '600px', backgroundColor: '#0f172a', border: '2px solid #38bdf8', borderRadius: '16px', padding: '2rem', color: '#f8fafc' }}>
-              <h2 style={{ fontSize: '2.5rem', textShadow: '0 0 10px #38bdf8', marginTop: 0, textAlign: 'center' }}>HOW TO SURVIVE</h2>
-              
-              <ul style={{ fontSize: '1.2rem', lineHeight: '1.8', listStyleType: 'none', padding: 0 }}>
-                <li style={{ marginBottom: '1rem' }}><strong style={{ color: '#facc15' }}>MOVEMENT:</strong> Click/touch your fighter and drag backward, then release to launch yourself like a slingshot. The further you drag, the harder you hit.</li>
-                <li style={{ marginBottom: '1rem' }}><strong style={{ color: '#ef4444' }}>THE CAGE:</strong> Direct hits don't deal damage. You only lose HP when smashed into the glowing arena wall. Deplete your opponent's HP to zero to knock them out!</li>
-                <li style={{ marginBottom: '1rem' }}><strong style={{ color: '#38bdf8' }}>DASH (Q or Left Button):</strong> Instantly applies a massive burst of speed in your current direction. Use it to dodge or counter-attack.</li>
-                <li><strong style={{ color: '#f43f5e' }}>SHIELD (E or Right Button):</strong> Turn into an immovable brick wall for 1.5 seconds. While active, you take ZERO damage if knocked into the wall.</li>
-              </ul>
-
-              <div style={{ textAlign: 'center', marginTop: '2rem' }}>
-                <button onClick={() => setShowTutorial(false)} style={{ padding: '1rem 3rem', fontSize: '1.2rem', backgroundColor: '#38bdf8', color: '#0f172a', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>GOT IT</button>
-              </div>
+      {/* Main Content Area */}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '3rem 1rem' }}>
+        
+        {appState === 'menu' ? (
+          <div style={{ textAlign: 'center', maxWidth: '600px', marginTop: '4rem' }}>
+            <h2 style={{ fontSize: '3.5rem', fontWeight: '900', margin: '0 0 1rem 0', letterSpacing: '-2px' }}>Sumo Duel 1D</h2>
+            <p style={{ fontSize: '1.2rem', color: '#0ea5e9', fontWeight: 'bold', margin: '0 0 1.5rem 0' }}>Dash, brace, and parry on a single shove lane.</p>
+            <p style={{ color: '#4b5563', lineHeight: '1.6', marginBottom: '3rem' }}>Enter a room code to spin up a private match. The arena strips the brawl down to one layer. With nowhere to circle and nothing to hide behind, the match becomes pure timing.</p>
+            
+            <input type="text" placeholder="ENTER ROOM CODE" value={roomInput} onChange={(e) => setRoomInput(e.target.value)} maxLength={6} 
+              style={{ fontSize: '1.5rem', padding: '1rem', textAlign: 'center', borderRadius: '12px', border: '3px solid #111827', backgroundColor: '#ffffff', color: '#111827', textTransform: 'uppercase', marginBottom: '2rem', width: '100%', maxWidth: '300px', boxShadow: '4px 4px 0px #111827', fontWeight: 'bold', outline: 'none' }} 
+            />
+            
+            <div style={{ display: 'flex', gap: '1.5rem', justifyContent: 'center' }}>
+              <QuipButton primary={true} onClick={() => handleJoinRoom('play')}>Play Sumo</QuipButton>
+              <QuipButton onClick={() => handleJoinRoom('spectate')}>Spectate</QuipButton>
             </div>
           </div>
-        )}
-      </div>
-    );
-  }
+        ) : (
+          <div style={{ position: 'relative' }}>
+            {/* The Game Canvas Wrapper with solid shadow */}
+            <div style={{ border: '4px solid #111827', borderRadius: '24px', overflow: 'hidden', boxShadow: '8px 8px 0px #111827', backgroundColor: '#ffffff' }}>
+              <canvas ref={canvasRef} width={800} height={600} />
+            </div>
+            
+            {/* Lobby Overlay */}
+            {lobbyUI.state === 'lobby' && (
+              <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(255, 255, 255, 0.9)', borderRadius: '24px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 10 }}>
+                <div style={{ backgroundColor: '#ffffff', border: '4px solid #111827', borderRadius: '16px', padding: '2rem 4rem', textAlign: 'center', boxShadow: '6px 6px 0px #111827' }}>
+                  <h1 style={{ fontSize: '2rem', margin: '0 0 1rem 0' }}>Waiting for opponent.</h1>
+                  <p style={{ color: '#4b5563', fontSize: '1.2rem', margin: '0 0 2rem 0' }}>Players Ready: <strong style={{ color: lobbyUI.ready === 2 ? '#10b981' : '#f59e0b' }}>{lobbyUI.ready} / 2</strong></p>
+                  <QuipButton onClick={() => setAppState('menu')}>Exit Room</QuipButton>
+                </div>
+              </div>
+            )}
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', backgroundColor: '#020617', padding: '2rem', minHeight: '100vh', margin: 0, fontFamily: 'sans-serif' }}>
-      <h2 style={{ color: '#f8fafc', letterSpacing: '4px', textShadow: '0 0 20px rgba(56, 189, 248, 0.5)', margin: '0 0 1rem 0' }}>ROOM: {roomInput.toUpperCase()}</h2>
-      
-      <div style={{ position: 'relative' }}>
-        <canvas ref={canvasRef} width={800} height={600} style={{ border: '4px solid #1e293b', borderRadius: '16px', boxShadow: '0 0 60px rgba(0,0,0,1)' }} />
-        
-        {lobbyUI.state === 'lobby' && (
-          <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(2, 6, 23, 0.85)', borderRadius: '12px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 10 }}>
-            <h1 style={{ color: '#f8fafc', fontSize: '3.5rem', textShadow: '0 0 20px #38bdf8' }}>WAITING FOR OPPONENT</h1>
-            <p style={{ color: '#94a3b8', fontSize: '1.5rem' }}>Players Ready: <span style={{ color: lobbyUI.ready === 2 ? '#4ade80' : '#facc15' }}>{lobbyUI.ready} / 2</span></p>
-          </div>
-        )}
-
-        {(lobbyUI.role === 'p1' || lobbyUI.role === 'p2') && lobbyUI.state === 'playing' && (
-          <div style={{ position: 'absolute', bottom: '20px', width: '100%', display: 'flex', justifyContent: 'space-between', padding: '0 40px', boxSizing: 'border-box', pointerEvents: 'none' }}>
-            <button onTouchStart={() => socketRef.current.emit('useSkill', 'dash')} onMouseDown={() => socketRef.current.emit('useSkill', 'dash')} style={{ pointerEvents: 'auto', width: '80px', height: '80px', borderRadius: '50%', border: 'none', backgroundColor: cooldowns.dash > 0 ? '#334155' : '#38bdf8', color: '#fff', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer', boxShadow: cooldowns.dash > 0 ? 'none' : '0 0 20px #38bdf8' }}>
-              {cooldowns.dash > 0 ? `${cooldowns.dash}s` : 'DASH (Q)'}
-            </button>
-            <button onTouchStart={() => socketRef.current.emit('useSkill', 'shield')} onMouseDown={() => socketRef.current.emit('useSkill', 'shield')} style={{ pointerEvents: 'auto', width: '80px', height: '80px', borderRadius: '50%', border: 'none', backgroundColor: cooldowns.shield > 0 ? '#334155' : '#f43f5e', color: '#fff', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer', boxShadow: cooldowns.shield > 0 ? 'none' : '0 0 20px #f43f5e' }}>
-              {cooldowns.shield > 0 ? `${cooldowns.shield}s` : 'SHIELD (E)'}
-            </button>
+            {/* In-Game Mobile HUD mimicking Quip UI */}
+            {(lobbyUI.role === 'p1' || lobbyUI.role === 'p2') && lobbyUI.state === 'playing' && (
+              <div style={{ position: 'absolute', bottom: '30px', width: '100%', display: 'flex', justifyContent: 'space-between', padding: '0 40px', boxSizing: 'border-box', pointerEvents: 'none' }}>
+                <button onTouchStart={() => socketRef.current.emit('useSkill', 'dash')} onMouseDown={() => socketRef.current.emit('useSkill', 'dash')} 
+                  style={{ pointerEvents: 'auto', width: '90px', height: '90px', borderRadius: '50%', border: '4px solid #111827', backgroundColor: cooldowns.dash > 0 ? '#e2e8f0' : '#ffffff', color: '#111827', fontSize: '1rem', fontWeight: '900', cursor: 'pointer', boxShadow: '4px 4px 0px #111827', opacity: cooldowns.dash > 0 ? 0.5 : 1 }}>
+                  {cooldowns.dash > 0 ? `${cooldowns.dash}s` : 'MOVE'}
+                </button>
+                <div style={{display: 'flex', gap: '1rem'}}>
+                  <button onTouchStart={() => socketRef.current.emit('useSkill', 'shield')} onMouseDown={() => socketRef.current.emit('useSkill', 'shield')} 
+                    style={{ pointerEvents: 'auto', width: '90px', height: '90px', borderRadius: '50%', border: '4px solid #111827', backgroundColor: cooldowns.shield > 0 ? '#e2e8f0' : '#ffffff', color: '#111827', fontSize: '1rem', fontWeight: '900', cursor: 'pointer', boxShadow: '4px 4px 0px #111827', opacity: cooldowns.shield > 0 ? 0.5 : 1 }}>
+                    {cooldowns.shield > 0 ? `${cooldowns.shield}s` : 'PLANT'}
+                  </button>
+                  <button style={{ pointerEvents: 'auto', width: '90px', height: '90px', borderRadius: '50%', border: '4px solid #111827', backgroundColor: '#ffffff', color: '#111827', fontSize: '1rem', fontWeight: '900', boxShadow: '4px 4px 0px #111827' }}>
+                    DASH
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
